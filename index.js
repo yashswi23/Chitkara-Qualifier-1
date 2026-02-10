@@ -8,17 +8,13 @@ dotenv.config();
 const app = express();
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "32kb" }));
 
 // --------- GEMINI SETUP ---------
 const apiKey = process.env.GEMINI_API_KEY;
-if (!apiKey) {
-  throw new Error("GEMINI_API_KEY is missing from environment");
-}
-
-const genAI = new GoogleGenerativeAI(apiKey);
-const MODEL_NAME = process.env.GEMINI_MODEL || "gemini-1.5-flash";
-const model = genAI.getGenerativeModel({ model: MODEL_NAME });
+const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
+const MODEL_NAME = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const model = genAI ? genAI.getGenerativeModel({ model: MODEL_NAME }) : null;
 
 
 
@@ -39,6 +35,25 @@ const gcd = (a, b) => (b === 0 ? a : gcd(b, a % b));
 const lcm = (arr) => arr.reduce((acc, num) => (acc * num) / gcd(acc, num));
 
 const hcf = (arr) => arr.reduce((acc, num) => gcd(acc, num));
+
+const isIntegerArray = (value) =>
+  Array.isArray(value) &&
+  value.length > 0 &&
+  value.every((num) => Number.isInteger(num));
+
+const isPositiveInteger = (value) =>
+  Number.isInteger(value) && value > 0;
+
+const fibonacciSeries = (n) => {
+  const series = [0, 1];
+  if (n === 1) return [0];
+  if (n === 2) return series;
+
+  for (let i = 2; i < n; i++) {
+    series.push(series[i - 1] + series[i - 2]);
+  }
+  return series;
+};
 
 // --------- ROUTES ---------
 
@@ -70,7 +85,7 @@ app.get("/models", async (req, res) => {
 
 app.post("/bfhl", async (req, res) => {
 
-  if (!req.body) {
+  if (!req.body || Object.keys(req.body).length === 0) {
     return res.status(400).json({
       is_success: false,
       error: "Request body missing",
@@ -78,37 +93,81 @@ app.post("/bfhl", async (req, res) => {
   }
 
   const body = req.body;
+  const keys = Object.keys(body);
+  if (keys.length !== 1) {
+    return res.status(400).json({
+      is_success: false,
+      error: "Exactly one key must be provided",
+    });
+  }
 
   let result;
 
   try {
-    // PRIME 
-    if (body.prime) {
+    // FIBONACCI
+    if (Object.prototype.hasOwnProperty.call(body, "fibonacci")) {
+      if (!isPositiveInteger(body.fibonacci) || body.fibonacci > 1000) {
+        return res.status(400).json({
+          is_success: false,
+          error: "fibonacci must be a positive integer <= 1000",
+        });
+      }
+      result = fibonacciSeries(body.fibonacci);
+    }
+
+    // PRIME
+    else if (Object.prototype.hasOwnProperty.call(body, "prime")) {
+      if (!isIntegerArray(body.prime)) {
+        return res.status(400).json({
+          is_success: false,
+          error: "prime must be a non-empty array of integers",
+        });
+      }
       result = body.prime.filter((num) => isPrime(num));
     }
 
-    // LCM 
-    else if (body.lcm) {
-      result = lcm(body.lcm);
+    // LCM
+    else if (Object.prototype.hasOwnProperty.call(body, "lcm")) {
+      if (!isIntegerArray(body.lcm)) {
+        return res.status(400).json({
+          is_success: false,
+          error: "lcm must be a non-empty array of integers",
+        });
+      }
+      result = lcm(body.lcm.map((num) => Math.abs(num)));
     }
 
-    // HCF 
-    else if (body.hcf) {
-      result = hcf(body.hcf);
+    // HCF
+    else if (Object.prototype.hasOwnProperty.call(body, "hcf")) {
+      if (!isIntegerArray(body.hcf)) {
+        return res.status(400).json({
+          is_success: false,
+          error: "hcf must be a non-empty array of integers",
+        });
+      }
+      result = hcf(body.hcf.map((num) => Math.abs(num)));
     }
 
     // AI LOGIC (GEMINI)
-    else if (body.AI) {
-      const prompt = `Respond with exactly one JSON field: {"data":"..."}. Keep it plain text, no markdown or extra keys. Question: ${body.AI}`;
+    else if (Object.prototype.hasOwnProperty.call(body, "AI")) {
+      if (typeof body.AI !== "string" || body.AI.trim().length === 0) {
+        return res.status(400).json({
+          is_success: false,
+          error: "AI must be a non-empty string",
+        });
+      }
+      if (!model) {
+        return res.status(500).json({
+          is_success: false,
+          error: "AI service is not configured",
+        });
+      }
+
+      const prompt = `Answer the question in exactly one word. Do not use punctuation or markdown. Question: ${body.AI}`;
       const aiResult = await model.generateContent(prompt);
       const text = aiResult.response.text();
-
-      try {
-        const parsed = JSON.parse(text);
-        result = typeof parsed?.data === "string" ? parsed.data : text;
-      } catch {
-        result = text;
-      }
+      const firstWord = text.trim().split(/\s+/)[0]?.replace(/[^A-Za-z0-9_-]/g, "");
+      result = firstWord || "";
     }
 
     // INVALID
