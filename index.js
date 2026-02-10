@@ -45,7 +45,7 @@ const hcf = (arr) => arr.reduce((acc, num) => gcd(acc, num));
 app.get("/health", (req, res) => {
   res.json({
     is_success: true,
-    official_email: "ya@chitkara.edu.in",
+    official_email: "yashswi1324.be23@chitkara.edu.in",
   });
 });
 
